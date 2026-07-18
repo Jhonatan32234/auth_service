@@ -1,6 +1,6 @@
 build:
   builder: nixpacks
-  buildCommand: go build -o auth-service .
+  buildCommand: go build -o auth-service ./cmd/auth-service
 deploy:
   startCommand: ./auth-service
   healthcheckPath: /health
