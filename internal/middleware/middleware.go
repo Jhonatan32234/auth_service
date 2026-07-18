@@ -1,11 +1,16 @@
 package middleware
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/Jhonatan32234/saferoute-auth/internal/security"
 	"golang.org/x/time/rate"
 )
 
@@ -82,17 +87,50 @@ func RateLimitMiddleware(limiter *IPRateLimiter) func(http.Handler) http.Handler
 
 // SignatureOrAPIKeyMiddleware verifica primero firma Ed25519 (X-Signature + X-Key-ID),
 // y si no está presente, cae a la API Key tradicional (X-Internal-API-Key).
-func SignatureOrAPIKeyMiddleware(expectedKey string) func(http.Handler) http.Handler {
+func SignatureOrAPIKeyMiddleware(servicePublicKey ed25519.PublicKey, expectedKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			signature := r.Header.Get("X-Signature")
 			keyID := r.Header.Get("X-Key-ID")
 
 			if signature != "" && keyID != "" {
-				// Verificación con firma asimétrica
-				// La implementación completa se integrará con pkg/signing
-				// Por ahora, si hay firma pero no podemos verificar, rechazamos
-				http.Error(w, `{"error":"firma asimétrica no soportada aún"}`, http.StatusForbidden)
+				if servicePublicKey == nil {
+					http.Error(w, `{"error":"clave pública de servicio no configurada"}`, http.StatusInternalServerError)
+					return
+				}
+
+				// Leer el body sin consumirlo permanentemente
+				var bodyBytes []byte
+				if r.Body != nil {
+					var err error
+					bodyBytes, err = io.ReadAll(r.Body)
+					if err != nil {
+						http.Error(w, `{"error":"error leyendo cuerpo de petición"}`, http.StatusBadRequest)
+						return
+					}
+					// Restaurar el body
+					r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+				}
+
+				timestampStr := r.Header.Get("X-Timestamp")
+				timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
+				if err != nil {
+					http.Error(w, `{"error":"X-Timestamp inválido o faltante"}`, http.StatusForbidden)
+					return
+				}
+
+				// Verificar la firma usando el módulo security
+				valid, err := security.VerifyRequest(servicePublicKey, r.Method, r.URL.Path, timestamp, bodyBytes, signature)
+				if err != nil || !valid {
+					errMsg := "firma de petición inválida"
+					if err != nil {
+						errMsg = errMsg + ": " + err.Error()
+					}
+					http.Error(w, `{"error":"`+errMsg+`"}`, http.StatusForbidden)
+					return
+				}
+
+				next.ServeHTTP(w, r)
 				return
 			}
 

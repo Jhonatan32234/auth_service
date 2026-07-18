@@ -16,6 +16,8 @@ type Config struct {
 	RateLimit      RateLimitConfig
 	InternalAPIKey string
 	EncryptionKey  string
+	JWTPrivateKey  string
+	ServicePublicKey string
 }
 
 type RateLimitConfig struct {
@@ -71,6 +73,9 @@ func Load() (*Config, error) {
 		log.Println("ENCRYPTION_KEY no configurado, usando clave de desarrollo. ¡No usar en producción!")
 	}
 
+	jwtPrivateKey := os.Getenv("JWT_PRIVATE_KEY")
+	servicePublicKey := os.Getenv("SERVICE_PUBLIC_KEY")
+
 	return &Config{
 		Port:          port,
 		DatabaseURL:   databaseURL,
@@ -80,7 +85,9 @@ func Load() (*Config, error) {
 			RequestsPerSecond: requestsPerSecond,
 			Burst:             burst,
 		},
-		InternalAPIKey: internalAPIKey,
-		EncryptionKey:  encryptionKey,
+		InternalAPIKey:   internalAPIKey,
+		EncryptionKey:    encryptionKey,
+		JWTPrivateKey:    jwtPrivateKey,
+		ServicePublicKey: servicePublicKey,
 	}, nil
 }

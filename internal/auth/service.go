@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/ed25519"
 	"fmt"
 	"log"
 	"strings"
@@ -13,14 +14,16 @@ import (
 type AuthService struct {
 	usuarioRepo   Repository
 	encryptionKey []byte
-	jwtSecret     string
+	jwtPrivateKey ed25519.PrivateKey
+	jwtPublicKey  ed25519.PublicKey
 }
 
-func NewAuthService(repo Repository, encryptionKey []byte, jwtSecret string) *AuthService {
+func NewAuthService(repo Repository, encryptionKey []byte, jwtPrivateKey ed25519.PrivateKey) *AuthService {
 	return &AuthService{
 		usuarioRepo:   repo,
 		encryptionKey: encryptionKey,
-		jwtSecret:     jwtSecret,
+		jwtPrivateKey: jwtPrivateKey,
+		jwtPublicKey:  jwtPrivateKey.Public().(ed25519.PublicKey),
 	}
 }
 
@@ -167,8 +170,8 @@ func (s *AuthService) generateJWT(userID, email, tipo, nombre string) (string, e
 		"iat":     time.Now().Unix(),
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(s.jwtSecret))
+	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	tokenString, err := token.SignedString(s.jwtPrivateKey)
 	if err != nil {
 		return "", fmt.Errorf("error firmando token: %w", err)
 	}
@@ -178,10 +181,10 @@ func (s *AuthService) generateJWT(userID, email, tipo, nombre string) (string, e
 
 func (s *AuthService) parseJWT(tokenString string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		if _, ok := token.Method.(*jwt.SigningMethodEd25519); !ok {
 			return nil, fmt.Errorf("método de firma inesperado: %v", token.Header["alg"])
 		}
-		return []byte(s.jwtSecret), nil
+		return s.jwtPublicKey, nil
 	})
 
 	if err != nil {
