@@ -10,7 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Jhonatan32234/saferoute-auth/internal/security"
+	"saferoute-auth/internal/security"
+
 	"golang.org/x/time/rate"
 )
 
@@ -39,10 +40,10 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 // ── Rate Limiting ─────────────────────────────────────────────────────────────
 
 type IPRateLimiter struct {
-	mu       sync.RWMutex
-	clients  map[string]*rate.Limiter
-	rate     rate.Limit
-	burst    int
+	mu      sync.RWMutex
+	clients map[string]*rate.Limiter
+	rate    rate.Limit
+	burst   int
 }
 
 func NewIPRateLimiter(r rate.Limit, burst int) *IPRateLimiter {

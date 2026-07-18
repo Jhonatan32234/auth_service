@@ -1,4 +1,4 @@
-module github.com/Jhonatan32234/saferoute-auth
+module saferoute-auth
 
 go 1.25.6
 
