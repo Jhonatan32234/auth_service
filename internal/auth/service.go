@@ -145,13 +145,6 @@ func (s *AuthService) RegisterAdminPublico(email, password, nombre, telefono str
         return AuthResponse{}, fmt.Errorf("error al crear usuario: %w", err)
     }
 
-    // ✅ Crear empresa en estado "pendiente" (sin plan)
-    err = s.usuarioRepo.CrearEmpresaPendiente(userID, nombre)
-    if err != nil {
-        log.Printf("[REGISTER-ADMIN] Error creando empresa pendiente: %v", err)
-        // No fallamos - el admin puede crear la empresa después
-    }
-
     // Generar token JWT
     token, err := s.generateJWT(userID, email, "admin", nombre)
     if err != nil {
