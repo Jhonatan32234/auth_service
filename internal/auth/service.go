@@ -258,14 +258,28 @@ func (s *AuthService) notificarMotorPredicciones(conductorID string) {
         motorURL = "http://localhost:8003"
     }
 
+    // ✅ Paso 1: Recargar conductores en el motor
+    client := &http.Client{Timeout: 10 * time.Second}
+    
+    resp, err := client.Post(
+        motorURL+"/predicciones/recargar-conductores",
+        "application/json",
+        bytes.NewBuffer([]byte("{}")),
+    )
+    if err != nil {
+        log.Printf("[MOTOR-PRED] No se pudo recargar conductores: %v", err)
+        return
+    }
+    resp.Body.Close()
+    log.Printf("[MOTOR-PRED] Conductores recargados en el motor")
+
+    // ✅ Paso 2: Ahora sí, generar perfil
     payload := map[string]string{
         "conductor_id": conductorID,
     }
-
     body, _ := json.Marshal(payload)
-    
-    client := &http.Client{Timeout: 5 * time.Second}
-    resp, err := client.Post(
+
+    resp2, err := client.Post(
         motorURL+"/predicciones/perfil",
         "application/json",
         bytes.NewBuffer(body),
@@ -274,12 +288,12 @@ func (s *AuthService) notificarMotorPredicciones(conductorID string) {
         log.Printf("[MOTOR-PRED] No se pudo notificar al motor: %v", err)
         return
     }
-    defer resp.Body.Close()
+    defer resp2.Body.Close()
 
-    if resp.StatusCode == http.StatusOK {
+    if resp2.StatusCode == http.StatusOK {
         log.Printf("[MOTOR-PRED] Perfil generado para conductor %s", conductorID)
     } else {
-        log.Printf("[MOTOR-PRED] Error generando perfil para %s: status %d", conductorID, resp.StatusCode)
+        log.Printf("[MOTOR-PRED] Conductor %s aún sin perfil (nuevo, status %d)", conductorID, resp2.StatusCode)
     }
 }
 
