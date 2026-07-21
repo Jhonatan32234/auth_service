@@ -1,9 +1,13 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/ed25519"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -108,6 +112,61 @@ func (s *AuthService) Register(req RegisterRequest) (AuthResponse, error) {
 	}, nil
 }
 
+// saferoute-auth/internal/auth/service.go
+
+func (s *AuthService) RegisterAdminPublico(email, password, nombre, telefono string) (AuthResponse, error) {
+    email = strings.ToLower(strings.TrimSpace(email))
+    nombre = strings.TrimSpace(nombre)
+    telefono = strings.TrimSpace(telefono)
+
+    // Verificar si ya existe
+    existente, _ := s.usuarioRepo.FindByEmail(email)
+    if existente != nil {
+        return AuthResponse{}, fmt.Errorf("el email ya está registrado")
+    }
+
+    // Hash de contraseña
+    hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+    if err != nil {
+        return AuthResponse{}, fmt.Errorf("error procesando contraseña")
+    }
+
+    // Crear admin
+    entity := &UsuarioEntity{
+        Email:        email,
+        PasswordHash: string(hashedPassword),
+        Nombre:       nombre,
+        Tipo:         "admin",
+        Telefono:     telefono,
+    }
+
+    userID, err := s.usuarioRepo.Create(entity)
+    if err != nil {
+        return AuthResponse{}, fmt.Errorf("error al crear usuario: %w", err)
+    }
+
+    // ✅ Crear empresa en estado "pendiente" (sin plan)
+    err = s.usuarioRepo.CrearEmpresaPendiente(userID, nombre)
+    if err != nil {
+        log.Printf("[REGISTER-ADMIN] Error creando empresa pendiente: %v", err)
+        // No fallamos - el admin puede crear la empresa después
+    }
+
+    // Generar token JWT
+    token, err := s.generateJWT(userID, email, "admin", nombre)
+    if err != nil {
+        return AuthResponse{}, fmt.Errorf("error generando token")
+    }
+
+    return AuthResponse{
+        Token:  token,
+        Nombre: nombre,
+        Tipo:   "admin",
+        Email:  email,
+        UserID: userID,
+    }, nil
+}
+
 func (s *AuthService) ValidateToken(tokenString string) (map[string]interface{}, error) {
 	claims, err := s.parseJWT(tokenString)
 	if err != nil {
@@ -131,10 +190,45 @@ func (s *AuthService) GetUserByID(id string) (*UsuarioEntity, error) {
 	return s.usuarioRepo.FindByID(id)
 }
 
-func (s *AuthService) RegisterConductor(email, password, nombre, telefono string) (string, error) {
+
+func (s *AuthService) VerificarLimiteConductores(adminID string) (int, error) {
+	empresa, err := s.usuarioRepo.FindEmpresaByAdminID(adminID)
+	if err != nil {
+		return 0, fmt.Errorf("no tienes una empresa registrada. Crea tu plan primero.")
+	}
+
+	if empresa.EstadoSuscripcion != "activo" {
+		return 0, fmt.Errorf("tu suscripción no está activa")
+	}
+
+	total, err := s.usuarioRepo.CountConductoresByEmpresa(empresa.ID)
+	if err != nil {
+		return 0, fmt.Errorf("error verificando conductores")
+	}
+
+	limite := empresa.MaxConductores + empresa.ConductoresExtra
+	if total >= limite {
+		return 0, fmt.Errorf(
+			"límite de conductores alcanzado (%d/%d). Actualiza tu plan.",
+			total, limite,
+		)
+	}
+
+	return limite, nil
+}
+
+func (s *AuthService) RegisterConductor(email, password, nombre, telefono, adminID string) (string, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	nombre = strings.TrimSpace(nombre)
 	telefono = strings.TrimSpace(telefono)
+
+	var empresaID string
+    if adminID != "" {
+        empresa, err := s.usuarioRepo.FindEmpresaByAdminID(adminID)
+        if err == nil {
+            empresaID = empresa.ID
+        }
+    }
 
 	if email == "" || password == "" || nombre == "" {
 		return "", fmt.Errorf("email, password y nombre requeridos")
@@ -151,13 +245,49 @@ func (s *AuthService) RegisterConductor(email, password, nombre, telefono string
 		Nombre:       nombre,
 		Tipo:         "conductor",
 		Telefono:     telefono,
+		EmpresaID:    empresaID, // ← Asociar a la empresa del admin
 	}
 
 	id, err := s.usuarioRepo.Create(u)
 	if err != nil {
 		return "", fmt.Errorf("el email ya está registrado")
 	}
+
+	go s.notificarMotorPredicciones(id)
+
 	return id, nil
+}
+
+
+func (s *AuthService) notificarMotorPredicciones(conductorID string) {
+    motorURL := os.Getenv("MOTOR_PREDICCIONES_URL")
+    if motorURL == "" {
+        motorURL = "http://localhost:8003"
+    }
+
+    payload := map[string]string{
+        "conductor_id": conductorID,
+    }
+
+    body, _ := json.Marshal(payload)
+    
+    client := &http.Client{Timeout: 5 * time.Second}
+    resp, err := client.Post(
+        motorURL+"/predicciones/perfil",
+        "application/json",
+        bytes.NewBuffer(body),
+    )
+    if err != nil {
+        log.Printf("[MOTOR-PRED] No se pudo notificar al motor: %v", err)
+        return
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode == http.StatusOK {
+        log.Printf("[MOTOR-PRED] Perfil generado para conductor %s", conductorID)
+    } else {
+        log.Printf("[MOTOR-PRED] Error generando perfil para %s: status %d", conductorID, resp.StatusCode)
+    }
 }
 
 func (s *AuthService) generateJWT(userID, email, tipo, nombre string) (string, error) {

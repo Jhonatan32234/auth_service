@@ -77,6 +77,51 @@ func (h *Handler) RegisterHandler() http.HandlerFunc {
 	}
 }
 
+// saferoute-auth/internal/auth/handler.go
+
+// RegistrarAdminPublicoHandler - Crea admin + empresa pendiente
+func (h *Handler) RegistrarAdminPublicoHandler() http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+            Email    string `json:"email"`
+            Password string `json:"password"`
+            Nombre   string `json:"nombre"`
+            Telefono string `json:"telefono"`
+        }
+
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            writeError(w, http.StatusBadRequest, "datos inválidos")
+            return
+        }
+
+        // Validaciones
+        if req.Email == "" || req.Password == "" || req.Nombre == "" {
+            writeError(w, http.StatusBadRequest, "email, password y nombre son requeridos")
+            return
+        }
+        if len(req.Password) < 6 {
+            writeError(w, http.StatusBadRequest, "la contraseña debe tener al menos 6 caracteres")
+            return
+        }
+
+        log.Printf("[REGISTER-ADMIN-PUBLICO] Email: %s, Nombre: %s", req.Email, req.Nombre)
+
+        result, err := h.authSvc.RegisterAdminPublico(req.Email, req.Password, req.Nombre, req.Telefono)
+        if err != nil {
+            log.Printf("[REGISTER-ADMIN-PUBLICO] Error: %v", err)
+            writeError(w, http.StatusConflict, err.Error())
+            return
+        }
+
+        log.Printf("[REGISTER-ADMIN-PUBLICO] Admin creado: %s (ID: %s)", result.Email, result.UserID)
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(result)
+    }
+}
+// ─── FIN NUEVO ───────────────────────────────────────────────────────────
+
 func (h *Handler) ValidateTokenHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -153,6 +198,7 @@ func (h *Handler) RegistrarConductorHandler() http.HandlerFunc {
 			Password string `json:"password"`
 			Nombre   string `json:"nombre"`
 			Telefono string `json:"telefono"`
+			AdminID  string `json:"admin_id"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -160,19 +206,29 @@ func (h *Handler) RegistrarConductorHandler() http.HandlerFunc {
 			return
 		}
 
-		validateReq := RegisterRequest{
-			Email:    req.Email,
-			Password: req.Password,
-			Nombre:   req.Nombre,
-			Tipo:     "conductor",
-			Telefono: req.Telefono,
+		// ✅ ZERO TRUST: Validar límites del plan
+		if req.AdminID != "" {
+			limite, err := h.authSvc.VerificarLimiteConductores(req.AdminID)
+			if err != nil {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			log.Printf("[ZERO-TRUST] Admin %s: límite verificado (%d conductores permitidos)", 
+				req.AdminID, limite)
 		}
-		if err := ValidateRegister(&validateReq); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+
+		if req.Email == "" || req.Password == "" || req.Nombre == "" {
+			writeError(w, http.StatusBadRequest, "email, password y nombre son requeridos")
 			return
 		}
 
-		id, err := h.authSvc.RegisterConductor(validateReq.Email, validateReq.Password, validateReq.Nombre, validateReq.Telefono)
+		id, err := h.authSvc.RegisterConductor(
+			req.Email, 
+			req.Password, 
+			req.Nombre, 
+			req.Telefono,
+			req.AdminID,
+		)
 		if err != nil {
 			writeError(w, http.StatusConflict, err.Error())
 			return

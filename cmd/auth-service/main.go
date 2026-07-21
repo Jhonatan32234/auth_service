@@ -31,7 +31,6 @@ func main() {
 	}
 	log.Println("✅ Clave de cifrado AES-256 cargada correctamente")
 
-	// Decodificar claves asimétricas Ed25519
 	jwtPrivateKeyBytes, err := base64.StdEncoding.DecodeString(cfg.JWTPrivateKey)
 	if err != nil {
 		log.Fatalf("Error decodificando JWT_PRIVATE_KEY: %v. Debe ser base64 de 64 bytes.", err)
@@ -75,16 +74,17 @@ func main() {
 	r.Use(middleware.RateLimitMiddleware(limiter))
 
 	// ── Rutas del Auth Service ─────────────────────────────────────────────────
-	// Rutas públicas (para la app móvil)
+	// Rutas públicas
 	r.HandleFunc("/auth/login", authHandler.LoginHandler()).Methods("POST")
 	r.HandleFunc("/auth/register", authHandler.RegisterHandler()).Methods("POST")
 
-	// Rutas internas (para comunicación entre servicios)
+	// Rutas internas (protegidas con firma Ed25519 o API Key)
 	internal := r.PathPrefix("/auth/internal").Subrouter()
 	internal.Use(middleware.SignatureOrAPIKeyMiddleware(servicePublicKey, cfg.InternalAPIKey))
 	internal.HandleFunc("/validate", authHandler.ValidateTokenHandler()).Methods("POST")
 	internal.HandleFunc("/user/{id}", authHandler.GetUserHandler()).Methods("GET")
 	internal.HandleFunc("/registrar-conductor", authHandler.RegistrarConductorHandler()).Methods("POST")
+	internal.HandleFunc("/registrar-admin-publico", authHandler.RegistrarAdminPublicoHandler()).Methods("POST")  // ← NUEVA
 
 	// Health check
 	r.HandleFunc("/auth/health", healthHandler()).Methods("GET", "HEAD")

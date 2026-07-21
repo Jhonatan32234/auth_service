@@ -11,6 +11,7 @@ type RegisterRequest struct {
 	Nombre   string `json:"nombre"`
 	Tipo     string `json:"tipo"`
 	Telefono string `json:"telefono"`
+	AdminID  string `json:"admin_id,omitempty"`
 }
 
 type AuthResponse struct {
