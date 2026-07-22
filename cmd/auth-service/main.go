@@ -53,7 +53,7 @@ func main() {
 	db := database.DB
 
 	// ── Repositorios ───────────────────────────────────────────────────────────
-	userRepo := auth.NewRepository(db)
+	userRepo := auth.NewRepositoryWithEncryption(db, encryptionKey)  // ← CAMBIADO
 
 	// ── Servicios ──────────────────────────────────────────────────────────────
 	authSvc := auth.NewAuthService(userRepo, encryptionKey, jwtPrivateKey)
@@ -74,17 +74,15 @@ func main() {
 	r.Use(middleware.RateLimitMiddleware(limiter))
 
 	// ── Rutas del Auth Service ─────────────────────────────────────────────────
-	// Rutas públicas
 	r.HandleFunc("/auth/login", authHandler.LoginHandler()).Methods("POST")
 	r.HandleFunc("/auth/register", authHandler.RegisterHandler()).Methods("POST")
 
-	// Rutas internas (protegidas con firma Ed25519 o API Key)
 	internal := r.PathPrefix("/auth/internal").Subrouter()
 	internal.Use(middleware.SignatureOrAPIKeyMiddleware(servicePublicKey, cfg.InternalAPIKey))
 	internal.HandleFunc("/validate", authHandler.ValidateTokenHandler()).Methods("POST")
 	internal.HandleFunc("/user/{id}", authHandler.GetUserHandler()).Methods("GET")
 	internal.HandleFunc("/registrar-conductor", authHandler.RegistrarConductorHandler()).Methods("POST")
-	internal.HandleFunc("/registrar-admin-publico", authHandler.RegistrarAdminPublicoHandler()).Methods("POST")  // ← NUEVA
+	internal.HandleFunc("/registrar-admin-publico", authHandler.RegistrarAdminPublicoHandler()).Methods("POST")
 
 	// Health check
 	r.HandleFunc("/auth/health", healthHandler()).Methods("GET", "HEAD")

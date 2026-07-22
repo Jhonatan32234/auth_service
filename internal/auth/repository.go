@@ -3,6 +3,7 @@ package auth
 import (
 	"database/sql"
 	"log"
+	"saferoute-auth/internal/security"
 )
 
 // Repository define las operaciones que el Auth Service necesita de la DB.
@@ -27,6 +28,12 @@ type EmpresaInfo struct {
 
 type authRepository struct {
 	db *sql.DB
+	encryptionKey []byte  // ← NUEVO
+
+}
+
+func NewRepositoryWithEncryption(db *sql.DB, encryptionKey []byte) Repository {
+    return &authRepository{db: db, encryptionKey: encryptionKey}
 }
 
 
@@ -100,24 +107,34 @@ func (r *authRepository) FindByID(id string) (*UsuarioEntity, error) {
 }
 
 func (r *authRepository) Create(u *UsuarioEntity) (string, error) {
-	log.Printf("[AUTH-REPO] Creando usuario - Email: %s, Teléfono: '%s'", u.Email, u.Telefono)
+    log.Printf("[AUTH-REPO] Creando usuario - Email: %s, Teléfono: '%s'", u.Email, u.Telefono)
 
-	var id string
-	err := r.db.QueryRow(
+    // ✅ Cifrar teléfono si hay encryptionKey disponible
+    if u.Telefono != "" && r.encryptionKey != nil {
+        encrypted, err := security.Encrypt(u.Telefono, r.encryptionKey)
+        if err != nil {
+            log.Printf("[AUTH-REPO] Error cifrando teléfono: %v", err)
+        } else {
+            u.Telefono = encrypted
+        }
+    }
+
+    var id string
+    err := r.db.QueryRow(
         `INSERT INTO usuarios (email, password_hash, nombre, tipo, telefono, empresa_id)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id`,
-        u.Email, u.PasswordHash, u.Nombre, u.Tipo, u.Telefono, 
-        nullableString(u.EmpresaID), // ← NUEVO
+        u.Email, u.PasswordHash, u.Nombre, u.Tipo, u.Telefono,
+        nullableString(u.EmpresaID),
     ).Scan(&id)
 
-	if err != nil {
-		log.Printf("[AUTH-REPO] Error INSERT: %v", err)
-		return "", err
-	}
+    if err != nil {
+        log.Printf("[AUTH-REPO] Error INSERT: %v", err)
+        return "", err
+    }
 
-	log.Printf("[AUTH-REPO] Usuario creado - ID: %s", id)
-	return id, nil
+    log.Printf("[AUTH-REPO] Usuario creado - ID: %s", id)
+    return id, nil
 }
 
 // compile-time check: asegura que authRepository implementa Repository
